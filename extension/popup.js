@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Check button event listener
     checkButton.addEventListener('click', function() {
+        // Reset previous state
         resultContainer.textContent = '';
         resultContainer.classList.add('hidden');
         errorElement.classList.add('hidden');
@@ -57,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
         chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
             let currentTab = tabs[0];
             
+            // Validate URL before sending
             if (!isValidUrl(currentTab.url)) {
                 errorElement.textContent = 'Invalid URL: Please provide a valid web address';
                 errorElement.classList.remove('hidden');
@@ -68,17 +70,16 @@ document.addEventListener('DOMContentLoaded', function() {
             fetch('http://localhost:5000/check_app', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Origin': chrome.runtime.getURL('')
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({url: currentTab.url}),
-                mode: 'cors'
+                body: JSON.stringify({url: currentTab.url})
             })
             .then(response => {
-                console.log('Response received:', response); // Debug log
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    // Handle HTTP errors
+                    return response.json().then(errorData => {
+                        throw new Error(errorData.details || 'Server Error');
+                    });
                 }
                 return response.json();
             })
@@ -112,11 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .catch(error => {
                 console.error('Verification Error:', error);
-                let errorMessage = error.message;
-                if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-                    errorMessage = 'Unable to connect to the verification server. Please ensure the Flask server is running.';
-                }
-                errorElement.textContent = `Error: ${errorMessage}`;
+                errorElement.textContent = `Error: ${error.message || 'Unable to verify app authenticity'}`;
                 errorElement.classList.remove('hidden');
             })
             .finally(() => {
