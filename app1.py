@@ -9,27 +9,11 @@ import ipaddress
 import logging
 
 app = Flask(__name__)
-CORS(app, resources={
-    r"/*": {  # Allow all routes
-        "origins": ["chrome-extension://*", "http://localhost:*"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Accept"],
-        "supports_credentials": True
-    }
-})
+CORS(app)
 
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
-
-# Enhanced logging configuration
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def check_domain_age(domain):
@@ -67,8 +51,8 @@ def check_domain_age(domain):
         
         return None
     except Exception as e:
-        logger.error(f"Unexpected error in domain age check: {e}", exc_info=True)
-        return None
+        logger.error(f"Unexpected error in domain age check: {e}")
+        raise e
 
 def verify_ssl_certificate(domain):
     """
@@ -94,7 +78,7 @@ def verify_ssl_certificate(domain):
         logger.warning(f"SSL connection timeout for {domain}")
         return {'is_valid': False, 'error': 'Connection Timeout'}
     except Exception as e:
-        logger.error(f"Unexpected SSL verification error: {e}", exc_info=True)
+        logger.error(f"Unexpected SSL verification error: {e}")
         return {'is_valid': False, 'error': 'Verification Failed'}
 
 def is_ip_address(domain):
@@ -112,51 +96,42 @@ def analyze_url(url):
     Comprehensive URL analysis with multiple risk checks
     """
     try:
-        logger.info(f"Starting URL analysis for: {url}")
         parsed_url = urllib.parse.urlparse(url)
         domain = parsed_url.netloc.split(':')[0]
         
         # Skip analysis for IP addresses
         if is_ip_address(domain):
-            logger.warning(f"IP address detected: {domain}")
             return {
                 'is_fake': True,
                 'message': 'IP Address Detection',
                 'details': 'Direct IP address URLs are suspicious'
             }
 
-        # Risk assessment
+        # Risk assessment dictionary
         risks = []
         is_fake = False
 
         # Domain age check
-        logger.debug(f"Checking domain age for: {domain}")
         domain_age_info = check_domain_age(domain)
         if domain_age_info:
             if domain_age_info['age_days'] < 180:
                 risks.append(f"Recently registered domain (Age: {domain_age_info['age_days']} days)")
                 is_fake = True
-            logger.info(f"Domain age result: {domain_age_info}")
-        else:
-            logger.warning("Unable to retrieve domain age information")
             
         # SSL verification
-        logger.debug(f"Verifying SSL certificate for: {domain}")
         ssl_result = verify_ssl_certificate(domain)
         if not ssl_result['is_valid']:
             risks.append(f"Invalid SSL Certificate: {ssl_result.get('error', 'Unknown Error')}")
             is_fake = True
-            logger.warning(f"SSL verification failed: {ssl_result}")
 
-        # Suspicious keywords check
+        # Suspicious keywords
         suspicious_keywords = ['clone', 'fake', 'mirror', 'replica', 'test', 'mock']
         if any(keyword in url.lower() for keyword in suspicious_keywords):
             risks.append("Suspicious URL keywords detected")
             is_fake = True
-            logger.warning(f"Suspicious keywords found in URL: {url}")
 
         # Prepare result
-        result = {
+        return {
             'is_fake': is_fake,
             'message': "App Authenticity" if not is_fake else "Potential Fake App Detected",
             'details': f"Risks identified: {', '.join(risks)}" if risks else "No immediate risks found",
@@ -165,16 +140,13 @@ def analyze_url(url):
                 'age_info': domain_age_info
             }
         }
-        
-        logger.info(f"Analysis complete. Result: {result}")
-        return result
     
     except Exception as e:
-        logger.error(f"Unexpected error in URL analysis: {e}", exc_info=True)
+        logger.error(f"Unexpected error in URL analysis: {e}")
         return {
             'is_fake': True, 
             'message': 'Analysis Error', 
-            'details': f'Unexpected error during URL verification: {str(e)}'
+            'details': f'Unexpected error during URL verification: {e}'
         }
 
 @app.route('/check_app', methods=['POST'])
@@ -182,18 +154,11 @@ def check_app():
     """
     Flask route for app URL verification
     """
-    logger.info("Received request to /check_app")
-    logger.debug(f"Request headers: {dict(request.headers)}")
-    
     try:
         data = request.json
-        logger.debug(f"Received data: {data}")
-        
         url = data.get('url', '').strip()
-        logger.info(f"Processing URL: {url}")
         
         if not url:
-            logger.warning("No URL provided")
             return jsonify({
                 'is_fake': True, 
                 'message': 'Invalid URL', 
@@ -205,8 +170,7 @@ def check_app():
             parsed_url = urllib.parse.urlparse(url)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise ValueError("Invalid URL format")
-        except Exception as e:
-            logger.warning(f"URL validation failed: {e}")
+        except Exception:
             return jsonify({
                 'is_fake': True, 
                 'message': 'Invalid URL', 
@@ -214,27 +178,15 @@ def check_app():
             }), 400
 
         result = analyze_url(url)
-        logger.info(f"Analysis complete. Result: {result}")
         return jsonify(result)
     
     except Exception as e:
-        logger.error(f"Server error in check_app route: {e}", exc_info=True)
+        logger.error(f"Server error in check_app route: {e}")
         return jsonify({
             'is_fake': True, 
             'message': 'Server Error', 
-            'details': str(e)
+            'details': 'An unexpected server error occurred'
         }), 500
 
-@app.route('/', methods=['GET'])
-def home():
-    """
-    Basic route to confirm server is running
-    """
-    return jsonify({
-        'status': 'running',
-        'message': 'Server is operational'
-    })
-
 if __name__ == '__main__':
-    logger.info("Starting Flask server...")
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    app.run(debug=True, port=5000)
